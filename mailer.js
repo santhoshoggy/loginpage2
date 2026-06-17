@@ -1,21 +1,10 @@
-require('dotenv').config();
-const nodemailer = require('nodemailer');
-const twilio = require('twilio');
+const { Resend } = require('resend');
 
-// ── Email setup ──────────────────────────────────────────────────────────────
-const transporter = nodemailer.createTransport({
-  host: 'smtp-relay.brevo.com',
-  port: 465,
-  secure: true,
-  auth: {
-    user: process.env.BREVO_USER,
-    pass: process.env.BREVO_PASS
-  }
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function sendOTPEmail(toEmail, otp) {
-  await transporter.sendMail({
-    from: '"Login App" <af11ab001@smtp-brevo.com>',
+  await resend.emails.send({
+    from: 'Login App <onboarding@resend.dev>',
     to: toEmail,
     subject: 'Your OTP Code',
     html: `
@@ -32,28 +21,13 @@ async function sendOTPEmail(toEmail, otp) {
   });
 }
 
-// ── SMS setup ────────────────────────────────────────────────────────────────
-async function sendOTPSMS(toPhone, otp) {
-  // Twilio free trial doesn't support Indian numbers — skipping SMS
-  console.log('SMS skipped — using email OTP only.');
-  return;
-}
-
-// ── Send both ────────────────────────────────────────────────────────────────
 async function sendOTP(toEmail, toPhone, otp) {
-  const results = await Promise.allSettled([
-    sendOTPEmail(toEmail, otp),
-    sendOTPSMS(toPhone, otp)
-  ]);
-
-  results.forEach(function(r, i) {
-    const channel = i === 0 ? 'Email' : 'SMS';
-    if (r.status === 'fulfilled') {
-      console.log(channel + ' OTP sent successfully.');
-    } else {
-      console.error(channel + ' OTP failed:', r.reason.message);
-    }
-  });
+  try {
+    await sendOTPEmail(toEmail, otp);
+    console.log('Email OTP sent successfully.');
+  } catch (err) {
+    console.error('Email OTP failed:', err.message);
+  }
 }
 
 module.exports = { sendOTP };
