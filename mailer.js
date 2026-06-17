@@ -15,7 +15,7 @@ const transporter = nodemailer.createTransport({
 
 async function sendOTPEmail(toEmail, otp) {
   await transporter.sendMail({
-    from: '"Login App" <' + process.env.BREVO_USER + '>',
+    from: '"Login App" <af11ab001@smtp-brevo.com>',
     to: toEmail,
     subject: 'Your OTP Code',
     html: `
