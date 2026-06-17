@@ -4,16 +4,18 @@ const twilio = require('twilio');
 
 // ── Email setup ──────────────────────────────────────────────────────────────
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp-relay.brevo.com',
+  port: 587,
+  secure: false,
   auth: {
-    user: process.env.EMAIL,
-    pass: process.env.EMAIL_PASS
+    user: process.env.BREVO_USER,
+    pass: process.env.BREVO_PASS
   }
 });
 
 async function sendOTPEmail(toEmail, otp) {
   await transporter.sendMail({
-    from: '"Login App" <' + process.env.EMAIL + '>',
+    from: '"Login App" <' + process.env.BREVO_USER + '>',
     to: toEmail,
     subject: 'Your OTP Code',
     html: `
@@ -32,28 +34,9 @@ async function sendOTPEmail(toEmail, otp) {
 
 // ── SMS setup ────────────────────────────────────────────────────────────────
 async function sendOTPSMS(toPhone, otp) {
-  // Skip if Twilio not configured
-  const sid   = process.env.TWILIO_ACCOUNT_SID;
-  const token = process.env.TWILIO_AUTH_TOKEN;
-  const from  = process.env.TWILIO_PHONE;
-
-  if (!sid || sid === 'your_account_sid_here' || !token || !from || from === '+1xxxxxxxxxx') {
-    console.log('Twilio not configured — skipping SMS.');
-    return;
-  }
-
-  const client = twilio(sid, token);
-
-  let phone = toPhone.trim();
-  if (/^\d{10}$/.test(phone)) {
-    phone = '+91' + phone;
-  }
-
-  await client.messages.create({
-    body: 'Your OTP is: ' + otp + '. Valid for 5 minutes. Do not share it.',
-    from: from,
-    to: phone
-  });
+  // Twilio free trial doesn't support Indian numbers — skipping SMS
+  console.log('SMS skipped — using email OTP only.');
+  return;
 }
 
 // ── Send both ────────────────────────────────────────────────────────────────
