@@ -1,54 +1,47 @@
-const initSqlJs = require('sql.js');
-const fs = require('fs');
-const path = require('path');
+const { Pool } = require('pg');
 
-const DB_PATH = path.join(__dirname, 'users.db');
-
-let db;
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 
 async function getDB() {
-  if (db) return db;
+  return pool;
+}
 
-  const SQL = await initSqlJs();
-
-  if (fs.existsSync(DB_PATH)) {
-    db = new SQL.Database(fs.readFileSync(DB_PATH));
-  } else {
-    db = new SQL.Database();
+async function initDB() {
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        email TEXT NOT NULL,
+        phone TEXT NOT NULL
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS pending_users (
+        id SERIAL PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        email TEXT NOT NULL,
+        phone TEXT NOT NULL
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS otp_store (
+        id SERIAL PRIMARY KEY,
+        username TEXT NOT NULL,
+        otp TEXT NOT NULL,
+        expires_at BIGINT NOT NULL
+      )
+    `);
+    console.log('Database initialized.');
+  } finally {
+    client.release();
   }
-
-  // Registered users
-  db.run(`CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    email TEXT NOT NULL,
-    phone TEXT NOT NULL
-  )`);
-
-  // Pending registrations (waiting for OTP)
-  db.run(`CREATE TABLE IF NOT EXISTS pending_users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    email TEXT NOT NULL,
-    phone TEXT NOT NULL
-  )`);
-
-  // OTP storage
-  db.run(`CREATE TABLE IF NOT EXISTS otp_store (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL,
-    otp TEXT NOT NULL,
-    expires_at INTEGER NOT NULL
-  )`);
-
-  saveDB(db);
-  return db;
 }
 
-function saveDB(dbInstance) {
-  fs.writeFileSync(DB_PATH, Buffer.from(dbInstance.export()));
-}
-
-module.exports = { getDB, saveDB };
+module.exports = { getDB, initDB };

@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
-const { getDB, saveDB } = require('./database');
+const { getDB, initDB } = require('./database');
 const { sendOTP } = require('./mailer');
 
 const app = express();
@@ -12,90 +12,58 @@ function generateOTP() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// Run a SELECT and return array of row objects
-function queryAll(db, sql, params) {
-  params = params || [];
-  var i = 0;
-  var safeSql = sql.replace(/\?/g, function() {
-    var val = params[i++];
-    return typeof val === 'string' ? "'" + val.replace(/'/g, "''") + "'" : val;
-  });
-  var result = db.exec(safeSql);
-  if (!result.length) return [];
-  var cols = result[0].columns;
-  return result[0].values.map(function(row) {
-    var obj = {};
-    cols.forEach(function(col, j) { obj[col] = row[j]; });
-    return obj;
-  });
-}
-
-function esc(str) {
-  return str.replace(/'/g, "''");
-}
-
-// ── REGISTER: save pending user + send OTP ──────────────────────────────────
+// ── REGISTER ─────────────────────────────────────────────────────────────────
 app.post('/api/register', async function(req, res) {
-  var username = req.body.username;
-  var password = req.body.password;
-  var email    = req.body.email;
-  var phone    = req.body.phone;
-
+  var { username, password, email, phone } = req.body;
   if (!username || !password || !email || !phone) {
     return res.json({ success: false, message: 'All fields are required.' });
   }
 
-  var db = await getDB();
+  const db = await getDB();
 
-  // Check if username already exists
-  var existing = queryAll(db, "SELECT id FROM users WHERE username = ?", [username]);
-  if (existing.length) {
+  const existing = await db.query('SELECT id FROM users WHERE username = $1', [username]);
+  if (existing.rows.length) {
     return res.json({ success: false, message: 'Username already taken.' });
   }
 
-  // Save as pending registration
-  db.run("DELETE FROM pending_users WHERE username = '" + esc(username) + "'");
-  db.run("INSERT INTO pending_users (username, password, email, phone) VALUES ('" +
-    esc(username) + "','" + esc(password) + "','" + esc(email) + "','" + esc(phone) + "')");
+  await db.query('DELETE FROM pending_users WHERE username = $1', [username]);
+  await db.query(
+    'INSERT INTO pending_users (username, password, email, phone) VALUES ($1,$2,$3,$4)',
+    [username, password, email, phone]
+  );
 
-  var otp = generateOTP();
-  var expiresAt = Date.now() + 5 * 60 * 1000;
-  db.run("DELETE FROM otp_store WHERE username = '" + esc(username) + "'");
-  db.run("INSERT INTO otp_store (username, otp, expires_at) VALUES ('" +
-    esc(username) + "','" + otp + "'," + expiresAt + ")");
-  saveDB(db);
+  const otp = generateOTP();
+  const expiresAt = Date.now() + 5 * 60 * 1000;
+  await db.query('DELETE FROM otp_store WHERE username = $1', [username]);
+  await db.query(
+    'INSERT INTO otp_store (username, otp, expires_at) VALUES ($1,$2,$3)',
+    [username, otp, expiresAt]
+  );
 
-  console.log('[REGISTER] Sending OTP to email: ' + email + ' | phone: ' + phone);
-
-  // Send OTP to email and phone
+  console.log('[REGISTER] Sending OTP to email: ' + email);
   try {
     await sendOTP(email, phone, otp);
   } catch (err) {
     console.error('OTP send failed:', err.message);
   }
 
-  res.json({
-    success: true,
-    message: 'OTP sent to ' + email + ' and ' + phone
-  });
+  res.json({ success: true, message: 'OTP sent to ' + email });
 });
 
-// ── VERIFY REGISTER OTP: confirm and move to users table ────────────────────
+// ── VERIFY REGISTER OTP ───────────────────────────────────────────────────────
 app.post('/api/verify-register-otp', async function(req, res) {
-  var username = req.body.username;
-  var otp      = req.body.otp;
-  var db = await getDB();
+  var { username, otp } = req.body;
+  const db = await getDB();
 
-  var records = queryAll(db, "SELECT * FROM otp_store WHERE username = ?", [username]);
-  if (!records.length) {
+  const records = await db.query('SELECT * FROM otp_store WHERE username = $1', [username]);
+  if (!records.rows.length) {
     return res.json({ success: false, message: 'No OTP found. Please register again.' });
   }
 
-  var record = records[0];
-  if (Date.now() > record.expires_at) {
-    db.run("DELETE FROM otp_store WHERE username = '" + esc(username) + "'");
-    db.run("DELETE FROM pending_users WHERE username = '" + esc(username) + "'");
-    saveDB(db);
+  const record = records.rows[0];
+  if (Date.now() > parseInt(record.expires_at)) {
+    await db.query('DELETE FROM otp_store WHERE username = $1', [username]);
+    await db.query('DELETE FROM pending_users WHERE username = $1', [username]);
     return res.json({ success: false, message: 'OTP expired. Please register again.' });
   }
 
@@ -103,30 +71,32 @@ app.post('/api/verify-register-otp', async function(req, res) {
     return res.json({ success: false, message: 'Invalid OTP. Please try again.' });
   }
 
-  // Move from pending to users
-  var pending = queryAll(db, "SELECT * FROM pending_users WHERE username = ?", [username]);
-  if (!pending.length) {
+  const pending = await db.query('SELECT * FROM pending_users WHERE username = $1', [username]);
+  if (!pending.rows.length) {
     return res.json({ success: false, message: 'Registration data not found. Please register again.' });
   }
 
-  var p = pending[0];
-  db.run("INSERT INTO users (username, password, email, phone) VALUES ('" +
-    esc(p.username) + "','" + esc(p.password) + "','" + esc(p.email) + "','" + esc(p.phone) + "')");
-  db.run("DELETE FROM pending_users WHERE username = '" + esc(username) + "'");
-  db.run("DELETE FROM otp_store WHERE username = '" + esc(username) + "'");
-  saveDB(db);
+  const p = pending.rows[0];
+  await db.query(
+    'INSERT INTO users (username, password, email, phone) VALUES ($1,$2,$3,$4)',
+    [p.username, p.password, p.email, p.phone]
+  );
+  await db.query('DELETE FROM pending_users WHERE username = $1', [username]);
+  await db.query('DELETE FROM otp_store WHERE username = $1', [username]);
 
   res.json({ success: true, message: 'Registration successful!' });
 });
 
-// ── LOGIN: check credentials only ────────────────────────────────────────────
+// ── LOGIN ─────────────────────────────────────────────────────────────────────
 app.post('/api/login', async function(req, res) {
-  var username = req.body.username;
-  var password = req.body.password;
-  var db = await getDB();
+  var { username, password } = req.body;
+  const db = await getDB();
 
-  var users = queryAll(db, "SELECT * FROM users WHERE username = ? AND password = ?", [username, password]);
-  if (!users.length) {
+  const users = await db.query(
+    'SELECT * FROM users WHERE username = $1 AND password = $2',
+    [username, password]
+  );
+  if (!users.rows.length) {
     return res.json({ success: false, message: 'Invalid username or password.' });
   }
 
@@ -134,6 +104,12 @@ app.post('/api/login', async function(req, res) {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, function() {
-  console.log('Server running at http://localhost:' + PORT);
+
+initDB().then(function() {
+  app.listen(PORT, function() {
+    console.log('Server running at http://localhost:' + PORT);
+  });
+}).catch(function(err) {
+  console.error('DB init failed:', err.message);
+  process.exit(1);
 });
