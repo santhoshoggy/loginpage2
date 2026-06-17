@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="card">
+    <h2>Welcome!</h2>
+    <p class="info-text" id="welcome-msg">You are logged in.</p>
+    <br/>
+    <button onclick="logout()">Logout</button>
+  </div>
+
+  <script>
+    const user = sessionStorage.getItem('loggedInUser');
+    if (!user) {
+      window.location.href = 'index.html';
+    } else {
+      document.getElementById('welcome-msg').textContent = 'Welcome, ' + user + '! You are logged in.';
+    }
+    function logout() {
+      sessionStorage.clear();
+      window.location.href = 'index.html';
+    }
+  </script>
+</body>
+</html>
